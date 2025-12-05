@@ -1,32 +1,25 @@
 const nodemailer = require('nodemailer');
 const { VerificationCode } = require('../models/associations');
 
-// 👇 修改重點：Outlook 設定 + 強制 IPv4
+// 👇 修改重點：使用 Brevo (Sendinblue) SMTP
 const transporter = nodemailer.createTransport({
-  host: "smtp.office365.com",
+  host: "smtp-relay.brevo.com", // Brevo 的 SMTP 主機
   port: 587,
   secure: false, // STARTTLS
   auth: {
-    user: process.env.EMAIL_USER, 
-    pass: process.env.EMAIL_PASS
+    user: process.env.EMAIL_USER, // 你的 Brevo 登入信箱
+    pass: process.env.EMAIL_PASS  // 你的 Brevo SMTP Key
   },
   tls: {
-    ciphers: 'SSLv3',
     rejectUnauthorized: false
-  },
-  // 👇👇👇 絕對不能少這行！Render 救星 👇👇👇
-  family: 4, 
-  
-  // 連線逾時設定
-  connectionTimeout: 10000,
-  greetingTimeout: 10000
+  }
 });
 
 const generateCode = () => Math.floor(100000 + Math.random() * 900000).toString();
 
 exports.sendVerificationEmail = async (email, username = '同學') => {
   try {
-    console.log(`🚀 [Debug] (Outlook IPv4) 準備發信給: ${email}`);
+    console.log(`🚀 [Debug] (Brevo) 準備發信給: ${email}`);
     
     const code = generateCode();
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
@@ -41,7 +34,7 @@ exports.sendVerificationEmail = async (email, username = '同學') => {
       is_used: 0
     });
 
-    // 2. 設定信件內容
+    // 2. 信件內容
     const mailOptions = {
       from: `"東華學習資源平台" <${process.env.EMAIL_USER}>`, 
       to: email,
@@ -52,19 +45,20 @@ exports.sendVerificationEmail = async (email, username = '同學') => {
           <p>親愛的同學 ${username} 您好：</p>
           <p>您的註冊驗證碼為：</p>
           <h1 style="color: #f57f17; letter-spacing: 5px;">${code}</h1>
-          <p>此驗證碼將在 15 分鐘後失效。</p>
+          <hr>
+          <p>由 Brevo 強力發送 🚀</p>
         </div>
       `
     };
 
-    // 3. 發送郵件
-    console.log('📨 [Debug] 正在連線 Outlook SMTP...');
+    // 3. 發送
+    console.log('📨 [Debug] 連線 Brevo...');
     const info = await transporter.sendMail(mailOptions);
-    console.log(`✅ 驗證信發送成功! ID: ${info.messageId}`);
+    console.log(`✅ 發送成功! ID: ${info.messageId}`);
     return true;
 
   } catch (error) {
-    console.error('❌ 發送郵件失敗:', error);
+    console.error('❌ 發送失敗:', error);
     throw error;
   }
 };
