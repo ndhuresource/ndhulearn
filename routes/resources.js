@@ -7,7 +7,8 @@ const User = require('../models/User');
 
 const multer = require('multer');
 const cloudinary = require('cloudinary').v2;
-const stream = require('stream'); // 引入 Node.js 原生串流模組
+// 引入 CloudinaryStorage 讓檔案直接飛到雲端，不佔用伺服器 RAM
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
 
 // 👇 Debug Log
 console.log('🔍 [Resources Route] Cloudinary Config Check:');
@@ -21,32 +22,20 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// 2. 改用 MemoryStorage (暫存記憶體，不透過 storage engine 插件)
-const storage = multer.memoryStorage();
-const upload = multer({ 
-  storage: storage,
-  limits: { fileSize: 5 * 1024 * 1024 } // 限制 5MB，保護 Render 記憶體
+// 2. 設定 Storage Engine (這就是解決 OOM 的關鍵)
+// 檔案會以 Stream 方式直接傳輸，不會存入 Buffer
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'ndhu-resources', // Cloudinary 上的資料夾名稱
+    allowed_formats: ['jpg', 'png', 'jpeg', 'pdf', 'doc', 'docx', 'ppt', 'pptx', 'zip', 'rar'], // 允許的格式
+    resource_type: 'auto', // 自動偵測是圖片還是 raw 檔案 (如 pdf/zip)
+    // public_id: (req, file) => file.originalname, // 如果你想保留原始檔名可開這行，但建議讓 Cloudinary 自動生成亂數 ID 避免重複
+  },
 });
 
-// 3. 定義一個「手動上傳」的輔助函式
-const uploadToCloudinary = (fileBuffer, folder) => {
-  return new Promise((resolve, reject) => {
-    const uploadStream = cloudinary.uploader.upload_stream(
-      { 
-        folder: folder,
-        resource_type: 'auto' 
-      },
-      (error, result) => {
-        if (error) return reject(error);
-        resolve(result);
-      }
-    );
-    // 將記憶體中的檔案寫入 Cloudinary 串流
-    const bufferStream = new stream.PassThrough();
-    bufferStream.end(fileBuffer);
-    bufferStream.pipe(uploadStream);
-  });
-};
+// 使用上面的 storage 設定
+const upload = multer({ storage: storage });
 
 // ────────────────────────────────────────────────────────
 
@@ -56,31 +45,25 @@ router.get('/', resourceController.getAllResources);
 // 2. 獲取特定課程的資源 
 router.get('/course/:courseId', resourceController.getCourseResources);
 
-// 3. 上傳資源 (重寫邏輯)
+// 3. 上傳資源 (已優化記憶體使用)
+// 當程式執行到這裡時，multer 已經自動把檔案傳到 Cloudinary 了
 router.post('/', auth, upload.single('file'), async (req, res) => {
   try {
-    // 檢查是否有檔案
+    // 檢查是否有檔案 (如果有錯誤，multer 通常會先拋出，但這裡做雙重確認)
     if (!req.file) {
       return res.status(400).json({ message: '請選擇要上傳的檔案' });
     }
 
-    console.log('📂 [Debug] 收到檔案，準備手動上傳:', req.file.originalname);
+    console.log('✅ [Debug] Cloudinary 上傳成功，收到回傳資訊');
+    console.log('   - URL:', req.file.path);
+    console.log('   - Filename:', req.file.filename);
 
     const { 
       title, course_id, teacher, resource_type, year, grade_level, description, is_anonymous 
     } = req.body;
 
-    // 🔥 關鍵步驟：手動呼叫上傳函式
-    let uploadResult;
-    try {
-      uploadResult = await uploadToCloudinary(req.file.buffer, 'ndhu-resources');
-      console.log('✅ Cloudinary 上傳成功 URL:', uploadResult.secure_url);
-    } catch (uploadError) {
-      console.error('❌ Cloudinary 上傳失敗:', uploadError);
-      return res.status(500).json({ message: '圖片伺服器連線失敗', error: uploadError.message });
-    }
-
     // 1. 寫入資源資料庫
+    // 注意：現在檔案網址在 req.file.path，而不是我們自己組裝的
     const newResource = await Resource.create({
       title,
       course_id,
@@ -91,8 +74,8 @@ router.post('/', auth, upload.single('file'), async (req, res) => {
       grade_level,
       description,
       is_anonymous: is_anonymous === 'true' || is_anonymous === true,
-      file_path: uploadResult.secure_url, // 使用回傳的網址
-      file_size: req.file.size,
+      file_path: req.file.path,       // Cloudinary 回傳的網址
+      file_size: req.file.size || 0,  // Cloudinary 有時不一定會回傳 size，預設 0 防止錯誤
       mime_type: req.file.mimetype,
       original_filename: req.file.originalname
     });
@@ -105,6 +88,7 @@ router.post('/', auth, upload.single('file'), async (req, res) => {
       }
     } catch (pointError) {
       console.error('點數增加失敗:', pointError);
+      // 點數失敗不應該影響上傳成功的結果，所以只紀錄 log
     }
 
     res.status(201).json({ message: '上傳成功，獲得 20 點數！', resource: newResource });
