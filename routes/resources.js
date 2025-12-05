@@ -5,8 +5,44 @@ const auth = require('../middleware/auth');
 const Resource = require('../models/Resource'); 
 const User = require('../models/User'); 
 
-// 👇 修改重點：直接引入剛剛建立的設定檔，原本那一大串 multer 設定都可以刪掉了
-const upload = require('../config/cloudinary'); 
+// ── Cloudinary & Multer 設定 (直接寫在這裡，確保不會引用錯誤) ──
+const multer = require('multer');
+const cloudinary = require('cloudinary').v2;
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
+
+// 👇👇👇 偵錯間諜：直接在這裡印出變數狀態 👇👇👇
+console.log('🔍 [Resources Route] Cloudinary Config Check:');
+console.log('   - Cloud Name:', process.env.CLOUDINARY_CLOUD_NAME ? '✅ OK' : '❌ MISSING');
+console.log('   - API Key:', process.env.CLOUDINARY_API_KEY ? '✅ OK' : '❌ MISSING');
+console.log('   - API Secret:', process.env.CLOUDINARY_API_SECRET ? '✅ OK' : '❌ MISSING');
+
+// 1. 設定 Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
+
+// 2. 設定 Multer 儲存引擎
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: async (req, file) => {
+    try {
+      console.log('📂 準備上傳檔案:', file.originalname);
+      return {
+        folder: 'ndhu-resources', 
+        resource_type: 'auto', // 改用 auto 以支援各種格式
+        public_id: `${Date.now()}-${file.originalname.split('.')[0]}`, 
+      };
+    } catch (err) {
+      console.error('❌ Cloudinary Storage Error:', err);
+      throw err;
+    }
+  },
+});
+
+const upload = multer({ storage: storage });
+// ────────────────────────────────────────────────────────
 
 // 1. 獲取所有資源 
 router.get('/', resourceController.getAllResources);
@@ -53,13 +89,12 @@ router.post('/', auth, upload.single('file'), async (req, res) => {
       }
     } catch (pointError) {
       console.error('點數增加失敗:', pointError);
-      // 點數失敗不影響主要流程，所以不 return error
     }
 
     res.status(201).json({ message: '上傳成功，獲得 20 點數！', resource: newResource });
 
   } catch (error) {
-    console.error('❌ 上傳失敗 (Route Error):', error);
+    console.error('❌ 上傳失敗:', error);
     res.status(500).json({ message: '伺服器錯誤', error: error.message });
   }
 });
