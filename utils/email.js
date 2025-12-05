@@ -5,25 +5,24 @@ const { VerificationCode } = require('../models/associations');
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
-    user: 'ndhu.resource.service@gmail.com', // 你的專用帳號
-    pass: 'knybygrwuocmdsux'       // ⚠️ 記得換新的！
+    // 👇 修改這裡：改成讀取環境變數，不要直接寫死
+    user: process.env.EMAIL_USER, 
+    pass: process.env.EMAIL_PASS
   }
 });
 
 const generateCode = () => Math.floor(100000 + Math.random() * 900000).toString();
 
-// 修改：參數改成接收 email 和 username (因為註冊時還沒有 user 物件)
 exports.sendVerificationEmail = async (email, username = '同學') => {
   try {
     const code = generateCode();
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
-    // 1. 存入資料庫 (針對 Email 存驗證碼)
-    // 先刪除該 Email 舊的驗證碼
+    // 1. 存入資料庫
     await VerificationCode.destroy({ where: { email: email } });
     
     await VerificationCode.create({
-      user_id: null, // 註冊時還沒有 User ID，設為 null
+      user_id: null,
       email: email,
       code: code,
       expires_at: expiresAt,
@@ -32,8 +31,8 @@ exports.sendVerificationEmail = async (email, username = '同學') => {
 
     // 2. 設定信件內容
     const mailOptions = {
-      // ⚠️ 修正重點：這裡的 <...> 裡面必須跟 auth.user 一模一樣
-      from: '"東華學習資源平台" <ndhu.resource.service@gmail.com>', 
+      // 👇 修改這裡：寄件人地址也要用環境變數，確保一致
+      from: `"東華學習資源平台" <${process.env.EMAIL_USER}>`, 
       to: email,
       subject: '【驗證碼】東華學習資源平台註冊驗證',
       html: `
