@@ -1,4 +1,8 @@
 const app = require('./app');
+
+// 👇👇👇 新增這一行：信任 Render 的 Proxy (解決 ValidationError 報錯) 👇👇👇
+app.set('trust proxy', 1); 
+
 const sequelize = require('./config/database');
 const { College } = require('./models'); // 導入 College 模型用於檢查數據
 
@@ -50,11 +54,9 @@ sequelize.authenticate()
         await sequelize.sync({ force: true });
         console.log('數據庫強制同步完成');
       } else {
-        // ✨ 修改重點在這裡 ✨
-        // 生產環境 (Production) 邏輯修改：
+        // 生產環境 (Production) 邏輯：
         if (process.env.FORCE_SYNC === 'true') {
             console.warn('🚨 生產環境: 檢測到 FORCE_SYNC=true，正在同步資料庫結構...');
-            // 使用 alter: true 會自動建立缺少的表，或修改欄位，但不會刪除既有資料
             await sequelize.sync({ alter: true });
             console.log('✅ 生產環境: 資料庫同步完成！表已建立。');
         } else {

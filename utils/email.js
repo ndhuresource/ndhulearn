@@ -1,13 +1,18 @@
 const nodemailer = require('nodemailer');
 const { VerificationCode } = require('../models/associations');
 
-// 設定發信器
+// 設定發信器 (改用 Port 465 SSL 連線，防止 Render 逾時)
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com',  // 明確指定 Gmail 伺服器
+  port: 465,               // Gmail 的 SSL Port
+  secure: true,            // true 代表全程使用 SSL 加密
   auth: {
-    // 👇 修改這裡：改成讀取環境變數，不要直接寫死
     user: process.env.EMAIL_USER, 
     pass: process.env.EMAIL_PASS
+  },
+  // 防止某些雲端環境憑證檢查過嚴導致失敗
+  tls: {
+    rejectUnauthorized: false
   }
 });
 
@@ -19,6 +24,7 @@ exports.sendVerificationEmail = async (email, username = '同學') => {
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
     // 1. 存入資料庫
+    // 先刪除該 Email 舊的驗證碼，避免堆積
     await VerificationCode.destroy({ where: { email: email } });
     
     await VerificationCode.create({
@@ -31,7 +37,6 @@ exports.sendVerificationEmail = async (email, username = '同學') => {
 
     // 2. 設定信件內容
     const mailOptions = {
-      // 👇 修改這裡：寄件人地址也要用環境變數，確保一致
       from: `"東華學習資源平台" <${process.env.EMAIL_USER}>`, 
       to: email,
       subject: '【驗證碼】東華學習資源平台註冊驗證',
