@@ -1,32 +1,11 @@
-const nodemailer = require('nodemailer');
 const { VerificationCode } = require('../models/associations');
 
-// 👇 修改重點：Brevo 設定 + 強制 IPv4
-const transporter = nodemailer.createTransport({
-  host: "smtp-relay.brevo.com", // Brevo 主機
-  port: 587,                    // 使用 587 Port
-  secure: false,                // STARTTLS
-  auth: {
-    user: process.env.EMAIL_USER, // 你的 Brevo 帳號
-    pass: process.env.EMAIL_PASS  // 你的 Brevo SMTP Key
-  },
-  // 👇👇👇 絕對關鍵：Render 必備設定 👇👇👇
-  family: 4, 
-  
-  // 增加連線穩定性的設定
-  tls: {
-    rejectUnauthorized: false,
-    ciphers: 'SSLv3'
-  },
-  connectionTimeout: 10000, // 10秒逾時
-  greetingTimeout: 10000
-});
-
+// 生成 6 位數驗證碼
 const generateCode = () => Math.floor(100000 + Math.random() * 900000).toString();
 
 exports.sendVerificationEmail = async (email, username = '同學') => {
   try {
-    console.log(`🚀 [Debug] (Brevo+IPv4) 準備發信給: ${email}`);
+    console.log(`🚀 [Debug] (Brevo API) 準備發信給: ${email}`);
     
     const code = generateCode();
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
@@ -41,12 +20,21 @@ exports.sendVerificationEmail = async (email, username = '同學') => {
       is_used: 0
     });
 
-    // 2. 設定信件內容
-    const mailOptions = {
-      from: `"東華學習資源平台" <${process.env.EMAIL_USER}>`, 
-      to: email,
-      subject: '【驗證碼】東華學習資源平台註冊驗證',
-      html: `
+    // 2. 準備 API 請求資料
+    // Brevo API 文件: https://developers.brevo.com/reference/sendtransacemail
+    const apiUrl = 'https://api.brevo.com/v3/smtp/email';
+    const apiKey = process.env.EMAIL_PASS; // 這裡是 xkeysib- 開頭的 Key
+
+    const emailData = {
+      sender: {
+        name: "東華學習資源平台",
+        email: process.env.EMAIL_USER // 你的 Brevo 登入信箱
+      },
+      to: [
+        { email: email, name: username }
+      ],
+      subject: "【驗證碼】東華學習資源平台註冊驗證",
+      htmlContent: `
         <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
           <h2 style="color: #1367c2;">歡迎加入東華學習資源平台！</h2>
           <p>親愛的同學 ${username} 您好：</p>
@@ -59,10 +47,26 @@ exports.sendVerificationEmail = async (email, username = '同學') => {
       `
     };
 
-    // 3. 發送郵件
-    console.log('📨 [Debug] 連線 Brevo SMTP...');
-    const info = await transporter.sendMail(mailOptions);
-    console.log(`✅ 驗證信發送成功! ID: ${info.messageId}`);
+    // 3. 使用 fetch 發送 HTTP 請求 (這走 Port 443，絕對不會被擋)
+    console.log('📨 [Debug] 正在呼叫 Brevo API...');
+    
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'accept': 'application/json',
+        'api-key': apiKey,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify(emailData)
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(`Brevo API Error: ${JSON.stringify(data)}`);
+    }
+
+    console.log(`✅ 驗證信發送成功! Message ID: ${data.messageId}`);
     return true;
 
   } catch (error) {
