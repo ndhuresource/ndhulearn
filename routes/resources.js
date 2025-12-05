@@ -5,22 +5,25 @@ const auth = require('../middleware/auth');
 const Resource = require('../models/Resource'); 
 const User = require('../models/User'); 
 
-// ── Cloudinary & Multer 設定 ──────────────────────────────
 const multer = require('multer');
 const cloudinary = require('cloudinary').v2;
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 
-// 👇👇👇 偵錯間諜：印出變數狀態 (確認 Render 有讀到) 👇👇👇
-console.log('🔍 [Resources Route] Cloudinary Config Check:');
-console.log('   - Cloud Name:', process.env.CLOUDINARY_CLOUD_NAME ? '✅ OK' : '❌ MISSING');
-console.log('   - API Key:', process.env.CLOUDINARY_API_KEY ? '✅ OK' : '❌ MISSING');
-console.log('   - API Secret:', process.env.CLOUDINARY_API_SECRET ? '✅ OK' : '❌ MISSING');
+// 👇👇👇 偵錯間諜 2.0：檢查是否有「隱形空格」 👇👇👇
+const cloudName = process.env.CLOUDINARY_CLOUD_NAME || '';
+const apiKey = process.env.CLOUDINARY_API_KEY || '';
+const apiSecret = process.env.CLOUDINARY_API_SECRET || '';
+
+console.log('🔍 [Cloudinary 深度檢查]');
+console.log(`   - Cloud Name: '${cloudName}' (長度: ${cloudName.length})`); // 注意引號
+console.log(`   - API Key:    '${apiKey}' (長度: ${apiKey.length})`);
+console.log(`   - API Secret: '${apiSecret.slice(0, 5)}...' (長度: ${apiSecret.length})`);
 
 // 1. 設定 Cloudinary
 cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET
+  cloud_name: cloudName.trim(), // 強制去除空格
+  api_key: apiKey.trim(),       // 強制去除空格
+  api_secret: apiSecret.trim()  // 強制去除空格
 });
 
 // 2. 設定 Multer 儲存引擎
@@ -28,25 +31,25 @@ const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: async (req, file) => {
     try {
-      console.log('📂 [Debug] 收到檔案準備上傳:', file.originalname);
+      console.log('📂 [Debug] 準備上傳檔案:', file.originalname);
       return {
         folder: 'ndhu-resources', 
-        resource_type: 'auto', // 自動判斷是圖片、影片還是 PDF
+        resource_type: 'auto', 
         public_id: `${Date.now()}-${file.originalname.split('.')[0]}`, 
       };
     } catch (err) {
-      // 捕捉初始化錯誤，防止伺服器直接崩潰
-      console.error('❌ [CRITICAL] Cloudinary Storage Error:', err);
-      throw err;
+      console.error('❌ [Critical] Cloudinary 設定錯誤:', err);
+      // ⚠️ 修正：這裡不要 throw err，回傳 null 讓 Multer 處理錯誤，避免伺服器崩潰
+      return null; 
     }
   },
 });
 
-// 👇 修改重點：加入檔案大小限制 (10MB)，防止記憶體溢出導致崩潰
 const upload = multer({ 
   storage: storage,
-  limits: { fileSize: 10 * 1024 * 1024 } // 限制 10MB
+  limits: { fileSize: 10 * 1024 * 1024 } 
 });
+
 // ────────────────────────────────────────────────────────
 
 // 1. 獲取所有資源 
@@ -59,16 +62,17 @@ router.get('/course/:courseId', resourceController.getCourseResources);
 router.post('/', auth, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ message: '請選擇要上傳的檔案' });
+      // 如果因為 storage 錯誤導致 file 為空
+      console.error('❌ 上傳失敗: req.file 不存在 (可能是 Cloudinary 連線失敗)');
+      return res.status(500).json({ message: '檔案上傳失敗，請檢查後端 Logs 確認 Cloudinary 設定' });
     }
 
     const { 
       title, course_id, teacher, resource_type, year, grade_level, description, is_anonymous 
     } = req.body;
 
-    console.log('✅ 檔案上傳成功，Cloudinary URL:', req.file.path);
+    console.log('✅ Cloudinary 上傳成功 URL:', req.file.path);
 
-    // 1. 寫入資源資料庫
     const newResource = await Resource.create({
       title,
       course_id,
@@ -85,12 +89,10 @@ router.post('/', auth, upload.single('file'), async (req, res) => {
       original_filename: req.file.originalname
     });
 
-    // 2. 幫使用者加 20 點數
     try {
       const user = await User.findByPk(req.user.id);
       if (user) {
         await user.increment('current_points', { by: 20 });
-        console.log(`使用者 ${req.user.id} 上傳資源，獲得 20 點數`);
       }
     } catch (pointError) {
       console.error('點數增加失敗:', pointError);
@@ -99,13 +101,7 @@ router.post('/', auth, upload.single('file'), async (req, res) => {
     res.status(201).json({ message: '上傳成功，獲得 20 點數！', resource: newResource });
 
   } catch (error) {
-    // 捕捉 Multer 錯誤 (例如檔案太大)
-    if (error instanceof multer.MulterError) {
-        console.error('❌ 上傳失敗 (Multer Error):', error);
-        return res.status(400).json({ message: '檔案上傳錯誤 (可能是檔案太大)', error: error.message });
-    }
-    
-    console.error('❌ 上傳失敗 (Server Error):', error);
+    console.error('❌ Route Error:', error);
     res.status(500).json({ message: '伺服器錯誤', error: error.message });
   }
 });
@@ -116,7 +112,7 @@ router.get('/:id', auth, resourceController.getResourceById);
 // 5. 下載資源
 router.get('/:id/download', auth, resourceController.downloadResource);
 
-// 6. 刪除資源路由
+// 6. 刪除資源
 router.delete('/:id', auth, resourceController.deleteResource);
 
 module.exports = router;
