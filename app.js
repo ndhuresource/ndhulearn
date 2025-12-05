@@ -27,15 +27,23 @@ app.get('/', (req, res) => {
 // ==========================================
 
 // 從環境變量獲取允許的來源
-const allowedOrigins = process.env.ALLOWED_ORIGINS 
+const rawOrigins = process.env.ALLOWED_ORIGINS 
   ? process.env.ALLOWED_ORIGINS.split(',').map(s => s.trim()) 
-  : ['http://localhost:3000', 'http://localhost:5173', 'http://localhost:5174'];
+  : [];
 
-// 確保允許的來源清單中包含本地開發用的來源
-if (process.env.NODE_ENV === 'development') {
-    if (!allowedOrigins.includes('http://localhost:3000')) allowedOrigins.push('http://localhost:3000');
-    if (!allowedOrigins.includes('http://localhost:5173')) allowedOrigins.push('http://localhost:5173');
-}
+// 👇👇👇 修正區塊：確保生產環境 URL 使用 HTTPS 👇👇👇
+let allowedOrigins = rawOrigins.map(origin => {
+    // 如果是 Vercel 的 URL，強制使用 https
+    if (origin.includes('vercel.app')) {
+        return origin.replace(/^http:\/\//, 'https://');
+    }
+    return origin;
+});
+// 添加本地開發來源
+allowedOrigins.push('http://localhost:3000', 'http://localhost:5173', 'http://localhost:5174');
+// 移除重複的項目
+allowedOrigins = [...new Set(allowedOrigins)];
+
 
 console.log('Allowed origins:', allowedOrigins);
 
@@ -82,31 +90,30 @@ app.use(helmet({
 
 // 這裡我們將完整的 corsOptions 提取出來，以便重複使用
 const corsOptions = {
-    origin: function (origin, callback) {
-        if (!origin) return callback(null, true);
-        
-        if (allowedOrigins.indexOf(origin) !== -1) {
-            callback(null, true);
-        } else {
-            console.warn(`CORS blocked request from: ${origin}`);
-            if (isDevelopment) {
-                console.log(`Development mode: allowing origin ${origin}`);
-                callback(null, true);
-            } else {
-                callback(new Error('Not allowed by CORS'));
-            }
-        }
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'], 
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+    origin: function (origin, callback) {
+        if (!origin) return callback(null, true);
+        
+        if (allowedOrigins.includes(origin)) { // 使用 includes() 更簡潔
+            callback(null, true);
+        } else {
+            console.warn(`CORS blocked request from: ${origin}`);
+            if (isDevelopment) {
+                console.log(`Development mode: allowing origin ${origin}`);
+                callback(null, true);
+            } else {
+                callback(new Error('Not allowed by CORS'));
+            }
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'], 
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 };
 
 // CORS 配置 (應用於所有請求)
 app.use(cors(corsOptions));
 
 // 🔥 關鍵修正：明確處理所有路由的 OPTIONS 預檢請求，並應用完整的 corsOptions
-// 確保預檢成功是解決 net::ERR_... 失敗的關鍵步驟
 app.options('*', cors(corsOptions));
 
 app.use(morgan(isDevelopment ? 'dev' : 'combined'));
