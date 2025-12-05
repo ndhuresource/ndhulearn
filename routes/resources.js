@@ -5,32 +5,8 @@ const auth = require('../middleware/auth');
 const Resource = require('../models/Resource'); 
 const User = require('../models/User'); 
 
-// ── Cloudinary & Multer 設定 ──────────────────────────────
-const multer = require('multer');
-const cloudinary = require('cloudinary').v2;
-const { CloudinaryStorage } = require('multer-storage-cloudinary');
-
-// 1. 設定 Cloudinary
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET
-});
-
-// 2. 設定 Multer 儲存引擎
-const storage = new CloudinaryStorage({
-  cloudinary: cloudinary,
-  params: async (req, file) => {
-    return {
-      folder: 'ndhu-resources', 
-      resource_type: 'raw',     
-      public_id: file.originalname.split('.')[0], 
-    };
-  },
-});
-
-const upload = multer({ storage: storage });
-// ────────────────────────────────────────────────────────
+// 👇 修改重點：直接引入剛剛建立的設定檔，原本那一大串 multer 設定都可以刪掉了
+const upload = require('../config/cloudinary'); 
 
 // 1. 獲取所有資源 
 router.get('/', resourceController.getAllResources);
@@ -49,7 +25,7 @@ router.post('/', auth, upload.single('file'), async (req, res) => {
       title, course_id, teacher, resource_type, year, grade_level, description, is_anonymous 
     } = req.body;
 
-    console.log('檔案上傳成功，Cloudinary URL:', req.file.path);
+    console.log('✅ 檔案上傳成功，Cloudinary URL:', req.file.path);
 
     // 1. 寫入資源資料庫
     const newResource = await Resource.create({
@@ -77,12 +53,13 @@ router.post('/', auth, upload.single('file'), async (req, res) => {
       }
     } catch (pointError) {
       console.error('點數增加失敗:', pointError);
+      // 點數失敗不影響主要流程，所以不 return error
     }
 
     res.status(201).json({ message: '上傳成功，獲得 20 點數！', resource: newResource });
 
   } catch (error) {
-    console.error('上傳失敗:', error);
+    console.error('❌ 上傳失敗 (Route Error):', error);
     res.status(500).json({ message: '伺服器錯誤', error: error.message });
   }
 });
@@ -93,7 +70,7 @@ router.get('/:id', auth, resourceController.getResourceById);
 // 5. 下載資源
 router.get('/:id/download', auth, resourceController.downloadResource);
 
-// 🔥 6. 新增：刪除資源路由
+// 6. 刪除資源路由
 router.delete('/:id', auth, resourceController.deleteResource);
 
 module.exports = router;
