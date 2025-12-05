@@ -1,30 +1,35 @@
 const nodemailer = require('nodemailer');
 const { VerificationCode } = require('../models/associations');
 
-// 設定發信器 (改用 Port 465 SSL 連線，防止 Render 逾時)
+// 👇 修改重點：改用 Port 587 並關閉 secure (這是 STARTTLS 的標準寫法)
 const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',  // 明確指定 Gmail 伺服器
-  port: 465,               // Gmail 的 SSL Port
-  secure: true,            // true 代表全程使用 SSL 加密
+  host: 'smtp.gmail.com',
+  port: 587,               // 改用 587
+  secure: false,           // 587 必須設為 false
   auth: {
     user: process.env.EMAIL_USER, 
     pass: process.env.EMAIL_PASS
   },
-  // 防止某些雲端環境憑證檢查過嚴導致失敗
   tls: {
-    rejectUnauthorized: false
-  }
+    rejectUnauthorized: false, // 防止憑證問題
+    ciphers: 'SSLv3'           // 增加相容性
+  },
+  // 👇 增加連線逾時設定 (給它多一點時間，或快速失敗)
+  connectionTimeout: 10000, // 10秒
+  greetingTimeout: 10000,
+  socketTimeout: 10000
 });
 
 const generateCode = () => Math.floor(100000 + Math.random() * 900000).toString();
 
 exports.sendVerificationEmail = async (email, username = '同學') => {
   try {
+    console.log(`🚀 [Debug] 準備發信給: ${email} 使用帳號: ${process.env.EMAIL_USER}`); // Debug Log
+    
     const code = generateCode();
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
     // 1. 存入資料庫
-    // 先刪除該 Email 舊的驗證碼，避免堆積
     await VerificationCode.destroy({ where: { email: email } });
     
     await VerificationCode.create({
@@ -54,12 +59,13 @@ exports.sendVerificationEmail = async (email, username = '同學') => {
     };
 
     // 3. 發送郵件
-    await transporter.sendMail(mailOptions);
-    console.log(`✅ 驗證信已發送至: ${email}`);
+    console.log('📨 [Debug] 正在連線 Gmail...');
+    const info = await transporter.sendMail(mailOptions);
+    console.log(`✅ 驗證信發送成功! Message ID: ${info.messageId}`);
     return true;
 
   } catch (error) {
-    console.error('❌ 發送郵件失敗:', error);
+    console.error('❌ 發送郵件失敗 (詳細錯誤):', error);
     throw error;
   }
 };
