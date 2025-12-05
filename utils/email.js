@@ -14,6 +14,8 @@ const transporter = nodemailer.createTransport({
     rejectUnauthorized: false, // 防止憑證問題
     ciphers: 'SSLv3'           // 增加相容性
   },
+  // 👇👇👇 關鍵修正：強制使用 IPv4 👇👇👇
+  family: 4,
   // 👇 增加連線逾時設定 (給它多一點時間，或快速失敗)
   connectionTimeout: 10000, // 10秒
   greetingTimeout: 10000,

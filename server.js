@@ -3,6 +3,12 @@ const app = require('./app');
 // 👇👇👇 新增這一行：信任 Render 的 Proxy (解決 ValidationError 報錯) 👇👇👇
 app.set('trust proxy', 1); 
 
+// 👇👇👇 新增這一段：健康檢查路由 👇👇👇
+app.get('/', (req, res) => {
+  res.status(200).send('Backend is running!');
+});
+
+
 const sequelize = require('./config/database');
 const { College } = require('./models'); // 導入 College 模型用於檢查數據
 
