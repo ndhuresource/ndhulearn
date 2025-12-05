@@ -5,12 +5,12 @@ const auth = require('../middleware/auth');
 const Resource = require('../models/Resource'); 
 const User = require('../models/User'); 
 
-// ── Cloudinary & Multer 設定 (直接寫在這裡，確保不會引用錯誤) ──
+// ── Cloudinary & Multer 設定 ──────────────────────────────
 const multer = require('multer');
 const cloudinary = require('cloudinary').v2;
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 
-// 👇👇👇 偵錯間諜：直接在這裡印出變數狀態 👇👇👇
+// 👇👇👇 偵錯間諜：印出變數狀態 (確認 Render 有讀到) 👇👇👇
 console.log('🔍 [Resources Route] Cloudinary Config Check:');
 console.log('   - Cloud Name:', process.env.CLOUDINARY_CLOUD_NAME ? '✅ OK' : '❌ MISSING');
 console.log('   - API Key:', process.env.CLOUDINARY_API_KEY ? '✅ OK' : '❌ MISSING');
@@ -28,20 +28,25 @@ const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: async (req, file) => {
     try {
-      console.log('📂 準備上傳檔案:', file.originalname);
+      console.log('📂 [Debug] 收到檔案準備上傳:', file.originalname);
       return {
         folder: 'ndhu-resources', 
-        resource_type: 'auto', // 改用 auto 以支援各種格式
+        resource_type: 'auto', // 自動判斷是圖片、影片還是 PDF
         public_id: `${Date.now()}-${file.originalname.split('.')[0]}`, 
       };
     } catch (err) {
-      console.error('❌ Cloudinary Storage Error:', err);
+      // 捕捉初始化錯誤，防止伺服器直接崩潰
+      console.error('❌ [CRITICAL] Cloudinary Storage Error:', err);
       throw err;
     }
   },
 });
 
-const upload = multer({ storage: storage });
+// 👇 修改重點：加入檔案大小限制 (10MB)，防止記憶體溢出導致崩潰
+const upload = multer({ 
+  storage: storage,
+  limits: { fileSize: 10 * 1024 * 1024 } // 限制 10MB
+});
 // ────────────────────────────────────────────────────────
 
 // 1. 獲取所有資源 
@@ -94,7 +99,13 @@ router.post('/', auth, upload.single('file'), async (req, res) => {
     res.status(201).json({ message: '上傳成功，獲得 20 點數！', resource: newResource });
 
   } catch (error) {
-    console.error('❌ 上傳失敗:', error);
+    // 捕捉 Multer 錯誤 (例如檔案太大)
+    if (error instanceof multer.MulterError) {
+        console.error('❌ 上傳失敗 (Multer Error):', error);
+        return res.status(400).json({ message: '檔案上傳錯誤 (可能是檔案太大)', error: error.message });
+    }
+    
+    console.error('❌ 上傳失敗 (Server Error):', error);
     res.status(500).json({ message: '伺服器錯誤', error: error.message });
   }
 });
