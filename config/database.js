@@ -13,7 +13,12 @@ const sequelize = new Sequelize(
     dialectOptions: {
       // 移除 useUTC 配置
       dateStrings: true,
-      typeCast: true
+      typeCast: true,
+      // ✨ 關鍵修正：TiDB 強制要求 SSL 連線，這段一定要加 ✨
+      ssl: {
+        require: true,
+        rejectUnauthorized: false
+      }
     },
     pool: {
       max: 10,
