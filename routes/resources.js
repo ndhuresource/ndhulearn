@@ -26,22 +26,14 @@ cloudinary.config({
   api_secret: apiSecret.trim()  // 強制去除空格
 });
 
-// 2. 設定 Multer 儲存引擎
+// 2. 設定 Multer 儲存引擎 (簡化版，相容性最高)
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
-  params: async (req, file) => {
-    try {
-      console.log('📂 [Debug] 準備上傳檔案:', file.originalname);
-      return {
-        folder: 'ndhu-resources', 
-        resource_type: 'auto', 
-        public_id: `${Date.now()}-${file.originalname.split('.')[0]}`, 
-      };
-    } catch (err) {
-      console.error('❌ [Critical] Cloudinary 設定錯誤:', err);
-      // ⚠️ 修正：這裡不要 throw err，回傳 null 讓 Multer 處理錯誤，避免伺服器崩潰
-      return null; 
-    }
+  params: {
+    folder: 'ndhu-resources',
+    resource_type: 'auto',
+    // ⚠️ 暫時移除 public_id 函數，讓 Cloudinary 自己決定檔名，避免函式錯誤
+    // public_id: (req, file) => ... 
   },
 });
 
