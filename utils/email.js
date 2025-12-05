@@ -1,25 +1,32 @@
 const nodemailer = require('nodemailer');
 const { VerificationCode } = require('../models/associations');
 
-// 👇 修改重點：完全改用 Outlook 設定
+// 👇 修改重點：Outlook 設定 + 強制 IPv4
 const transporter = nodemailer.createTransport({
-  host: "smtp.office365.com", // Outlook 主機
-  port: 587,                  // Outlook 使用 587 Port
-  secure: false,              // 587 是 STARTTLS，所以 secure 要 false
+  host: "smtp.office365.com",
+  port: 587,
+  secure: false, // STARTTLS
   auth: {
     user: process.env.EMAIL_USER, 
     pass: process.env.EMAIL_PASS
   },
   tls: {
-    ciphers: 'SSLv3'          // 增加相容性
-  }
+    ciphers: 'SSLv3',
+    rejectUnauthorized: false
+  },
+  // 👇👇👇 絕對不能少這行！Render 救星 👇👇👇
+  family: 4, 
+  
+  // 連線逾時設定
+  connectionTimeout: 10000,
+  greetingTimeout: 10000
 });
 
 const generateCode = () => Math.floor(100000 + Math.random() * 900000).toString();
 
 exports.sendVerificationEmail = async (email, username = '同學') => {
   try {
-    console.log(`🚀 [Debug] (Outlook) 準備發信給: ${email}`);
+    console.log(`🚀 [Debug] (Outlook IPv4) 準備發信給: ${email}`);
     
     const code = generateCode();
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
