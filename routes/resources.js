@@ -7,40 +7,46 @@ const User = require('../models/User');
 
 const multer = require('multer');
 const cloudinary = require('cloudinary').v2;
-const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const stream = require('stream'); // 引入 Node.js 原生串流模組
 
-// 👇👇👇 偵錯間諜 2.0：檢查是否有「隱形空格」 👇👇👇
-const cloudName = process.env.CLOUDINARY_CLOUD_NAME || '';
-const apiKey = process.env.CLOUDINARY_API_KEY || '';
-const apiSecret = process.env.CLOUDINARY_API_SECRET || '';
-
-console.log('🔍 [Cloudinary 深度檢查]');
-console.log(`   - Cloud Name: '${cloudName}' (長度: ${cloudName.length})`); // 注意引號
-console.log(`   - API Key:    '${apiKey}' (長度: ${apiKey.length})`);
-console.log(`   - API Secret: '${apiSecret.slice(0, 5)}...' (長度: ${apiSecret.length})`);
+// 👇 Debug Log
+console.log('🔍 [Resources Route] Cloudinary Config Check:');
+console.log('   - Cloud Name:', process.env.CLOUDINARY_CLOUD_NAME ? '✅ OK' : '❌ MISSING');
+console.log('   - API Key:', process.env.CLOUDINARY_API_KEY ? '✅ OK' : '❌ MISSING');
 
 // 1. 設定 Cloudinary
 cloudinary.config({
-  cloud_name: cloudName.trim(), // 強制去除空格
-  api_key: apiKey.trim(),       // 強制去除空格
-  api_secret: apiSecret.trim()  // 強制去除空格
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// 2. 設定 Multer 儲存引擎 (簡化版，相容性最高)
-const storage = new CloudinaryStorage({
-  cloudinary: cloudinary,
-  params: {
-    folder: 'ndhu-resources',
-    resource_type: 'auto',
-    // ⚠️ 暫時移除 public_id 函數，讓 Cloudinary 自己決定檔名，避免函式錯誤
-    // public_id: (req, file) => ... 
-  },
-});
-
+// 2. 改用 MemoryStorage (暫存記憶體，不透過 storage engine 插件)
+const storage = multer.memoryStorage();
 const upload = multer({ 
   storage: storage,
-  limits: { fileSize: 10 * 1024 * 1024 } 
+  limits: { fileSize: 5 * 1024 * 1024 } // 限制 5MB，保護 Render 記憶體
 });
+
+// 3. 定義一個「手動上傳」的輔助函式
+const uploadToCloudinary = (fileBuffer, folder) => {
+  return new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      { 
+        folder: folder,
+        resource_type: 'auto' 
+      },
+      (error, result) => {
+        if (error) return reject(error);
+        resolve(result);
+      }
+    );
+    // 將記憶體中的檔案寫入 Cloudinary 串流
+    const bufferStream = new stream.PassThrough();
+    bufferStream.end(fileBuffer);
+    bufferStream.pipe(uploadStream);
+  });
+};
 
 // ────────────────────────────────────────────────────────
 
@@ -50,21 +56,31 @@ router.get('/', resourceController.getAllResources);
 // 2. 獲取特定課程的資源 
 router.get('/course/:courseId', resourceController.getCourseResources);
 
-// 3. 上傳資源
+// 3. 上傳資源 (重寫邏輯)
 router.post('/', auth, upload.single('file'), async (req, res) => {
   try {
+    // 檢查是否有檔案
     if (!req.file) {
-      // 如果因為 storage 錯誤導致 file 為空
-      console.error('❌ 上傳失敗: req.file 不存在 (可能是 Cloudinary 連線失敗)');
-      return res.status(500).json({ message: '檔案上傳失敗，請檢查後端 Logs 確認 Cloudinary 設定' });
+      return res.status(400).json({ message: '請選擇要上傳的檔案' });
     }
+
+    console.log('📂 [Debug] 收到檔案，準備手動上傳:', req.file.originalname);
 
     const { 
       title, course_id, teacher, resource_type, year, grade_level, description, is_anonymous 
     } = req.body;
 
-    console.log('✅ Cloudinary 上傳成功 URL:', req.file.path);
+    // 🔥 關鍵步驟：手動呼叫上傳函式
+    let uploadResult;
+    try {
+      uploadResult = await uploadToCloudinary(req.file.buffer, 'ndhu-resources');
+      console.log('✅ Cloudinary 上傳成功 URL:', uploadResult.secure_url);
+    } catch (uploadError) {
+      console.error('❌ Cloudinary 上傳失敗:', uploadError);
+      return res.status(500).json({ message: '圖片伺服器連線失敗', error: uploadError.message });
+    }
 
+    // 1. 寫入資源資料庫
     const newResource = await Resource.create({
       title,
       course_id,
@@ -75,12 +91,13 @@ router.post('/', auth, upload.single('file'), async (req, res) => {
       grade_level,
       description,
       is_anonymous: is_anonymous === 'true' || is_anonymous === true,
-      file_path: req.file.path,
-      file_size: req.file.size || 0,
+      file_path: uploadResult.secure_url, // 使用回傳的網址
+      file_size: req.file.size,
       mime_type: req.file.mimetype,
       original_filename: req.file.originalname
     });
 
+    // 2. 幫使用者加 20 點數
     try {
       const user = await User.findByPk(req.user.id);
       if (user) {
@@ -104,7 +121,7 @@ router.get('/:id', auth, resourceController.getResourceById);
 // 5. 下載資源
 router.get('/:id/download', auth, resourceController.downloadResource);
 
-// 6. 刪除資源
+// 6. 刪除資源路由
 router.delete('/:id', auth, resourceController.deleteResource);
 
 module.exports = router;
