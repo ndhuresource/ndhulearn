@@ -26,7 +26,6 @@ sequelize.authenticate()
       if (NODE_ENV === 'development') {
         console.log('開發環境: 檢查數據庫狀態...');
         
-        // 只驗證連接，不修改數據庫結構
         try {
           // 檢查數據庫中是否有數據
           const collegeCount = await College.count();
@@ -40,7 +39,6 @@ sequelize.authenticate()
         } catch (error) {
           console.error('數據庫檢查失敗:', error);
           
-          // 如果檢查失敗，可以考慮使用更保守的同步方式
           if (process.env.FORCE_SYNC === 'true') {
             console.warn('FORCE_SYNC=true, 嘗試安全同步數據庫...');
             await sequelize.sync({ alter: true });
@@ -52,8 +50,16 @@ sequelize.authenticate()
         await sequelize.sync({ force: true });
         console.log('數據庫強制同步完成');
       } else {
-        console.log('生產環境: 跳過自動數據庫同步');
-        // 在生產環境中，應該使用遷移而不是自動同步
+        // ✨ 修改重點在這裡 ✨
+        // 生產環境 (Production) 邏輯修改：
+        if (process.env.FORCE_SYNC === 'true') {
+            console.warn('🚨 生產環境: 檢測到 FORCE_SYNC=true，正在同步資料庫結構...');
+            // 使用 alter: true 會自動建立缺少的表，或修改欄位，但不會刪除既有資料
+            await sequelize.sync({ alter: true });
+            console.log('✅ 生產環境: 資料庫同步完成！表已建立。');
+        } else {
+            console.log('生產環境: 跳過自動數據庫同步 (若需同步請設定 FORCE_SYNC=true)');
+        }
       }
       
       // 啟動服務器
