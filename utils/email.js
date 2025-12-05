@@ -1,39 +1,39 @@
 const nodemailer = require('nodemailer');
 const { VerificationCode } = require('../models/associations');
 
-// 👇 修改重點：改用 Port 587 並關閉 secure (這是 STARTTLS 的標準寫法)
+// 👇 修改重點：回歸最原始、最強制的 SSL 連線設定
 const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 587,               // 改用 587
-  secure: false,           // 587 必須設為 false
+  host: 'smtp.gmail.com',  // 明確指定主機
+  port: 465,               // 明確指定 SSL Port
+  secure: true,            // 啟用 SSL
   auth: {
-    user: process.env.EMAIL_USER, 
+    user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS
   },
+  // 👇 關鍵設定 1：強制使用 IPv4 (Render 必備)
+  family: 4, 
+  
+  // 👇 關鍵設定 2：放寬 TLS 檢查 (避免雲端憑證錯誤)
   tls: {
-    rejectUnauthorized: false, // 防止憑證問題
-    ciphers: 'SSLv3'           // 增加相容性
+    rejectUnauthorized: false
   },
-  // 👇👇👇 關鍵修正：強制使用 IPv4 👇👇👇
-  family: 4,
-  // 👇 增加連線逾時設定 (給它多一點時間，或快速失敗)
-  connectionTimeout: 10000, // 10秒
-  greetingTimeout: 10000,
-  socketTimeout: 10000
+  
+  // 👇 關鍵設定 3：連線逾時保護
+  connectionTimeout: 10000,
+  greetingTimeout: 10000
 });
 
 const generateCode = () => Math.floor(100000 + Math.random() * 900000).toString();
 
 exports.sendVerificationEmail = async (email, username = '同學') => {
   try {
-    console.log(`🚀 [Debug] 準備發信給: ${email} 使用帳號: ${process.env.EMAIL_USER}`); // Debug Log
+    console.log(`🚀 [Debug] 準備發信給: ${email} (使用 SSL Port 465 + IPv4)`);
     
     const code = generateCode();
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
-    // 1. 存入資料庫
+    // 資料庫操作
     await VerificationCode.destroy({ where: { email: email } });
-    
     await VerificationCode.create({
       user_id: null,
       email: email,
@@ -42,7 +42,6 @@ exports.sendVerificationEmail = async (email, username = '同學') => {
       is_used: 0
     });
 
-    // 2. 設定信件內容
     const mailOptions = {
       from: `"東華學習資源平台" <${process.env.EMAIL_USER}>`, 
       to: email,
@@ -54,16 +53,13 @@ exports.sendVerificationEmail = async (email, username = '同學') => {
           <p>您的註冊驗證碼為：</p>
           <h1 style="color: #f57f17; letter-spacing: 5px;">${code}</h1>
           <p>此驗證碼將在 15 分鐘後失效。</p>
-          <hr>
-          <p style="font-size: 12px; color: #888;">此為系統自動發送，請勿直接回覆。</p>
         </div>
       `
     };
 
-    // 3. 發送郵件
     console.log('📨 [Debug] 正在連線 Gmail...');
     const info = await transporter.sendMail(mailOptions);
-    console.log(`✅ 驗證信發送成功! Message ID: ${info.messageId}`);
+    console.log(`✅ 驗證信發送成功! ID: ${info.messageId}`);
     return true;
 
   } catch (error) {
